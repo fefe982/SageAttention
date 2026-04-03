@@ -209,6 +209,21 @@ if not SKIP_CUDA_BUILD:
         )
 
     if HAS_SM90:
+        # SM90 kernels use wgmma/mbarrier/cp.async.bulk.tensor which ONLY work on sm_90a.
+        # These instructions are NOT supported on sm_80/86/89 (pre-Hopper) or sm_100a+/sm_120a+ (Blackwell+).
+        # Filter NVCC_FLAGS to only include the sm_90a gencode flag.
+        NVCC_FLAGS_SM90_FILTERED = []
+        i = 0
+        while i < len(NVCC_FLAGS):
+            if NVCC_FLAGS[i] == "-gencode" and i + 1 < len(NVCC_FLAGS):
+                next_flag = NVCC_FLAGS[i + 1]
+                if "compute_90a" in next_flag:
+                    NVCC_FLAGS_SM90_FILTERED.append(NVCC_FLAGS[i])
+                    NVCC_FLAGS_SM90_FILTERED.append(next_flag)
+                i += 2
+            else:
+                NVCC_FLAGS_SM90_FILTERED.append(NVCC_FLAGS[i])
+                i += 1
         ext_modules.append(
             CUDAExtension(
                 name="sageattention._qattn_sm90",
@@ -216,7 +231,7 @@ if not SKIP_CUDA_BUILD:
                     "csrc/qattn/pybind_sm90.cpp",
                     "csrc/qattn/qk_int_sv_f8_cuda_sm90.cu",
                 ],
-                extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+                extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS_SM90_FILTERED},
                 extra_link_args=['cuda.lib'] if IS_WINDOWS else ['-lcuda'],
             )
         )
