@@ -10,12 +10,19 @@
     One or more Python version strings, e.g. "3.11", "3.12", "3.13".
     Defaults to "3.11" if not specified.
 
+.PARAMETER TorchVersion
+    PyTorch version to install, e.g. "2.9.0", "2.11.0".
+    If not specified, installs the latest available.
+
 .EXAMPLE
-    .\build.ps1 3.11 3.12 3.13
+    .\build.ps1 2.9.0 3.10 3.11
 #>
 
 param(
-    [Parameter(Position = 0, ValueFromRemainingArguments)]
+    [Parameter(Position = 0)]
+    [string]$TorchVersion,
+
+    [Parameter(Position = 1, ValueFromRemainingArguments)]
     [string[]]$PythonVersions = @("3.11")
 )
 
@@ -154,11 +161,20 @@ foreach ($PyVer in $PythonVersions) {
         Write-Error "Failed to install base dependencies for Python $PyVer"
         continue
     }
-    uv pip install --python $pythonExe torch --index-url $torchIndexUrl
+    if ($TorchVersion) {
+        uv pip install --python $pythonExe "torch==$TorchVersion" --index-url $torchIndexUrl
+    } else {
+        uv pip install --python $pythonExe torch --index-url $torchIndexUrl
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to install torch for Python $PyVer"
         continue
     }
+
+    # Read back the actual installed torch version for wheel naming
+    $installedTorch = & $pythonExe -c "import torch; print(torch.__version__)" 2>&1
+    $torchTag = ($installedTorch -replace '\+.*$','') -replace '\.',''
+    Write-Host "  Installed PyTorch: $installedTorch (tag: torch$torchTag)" -ForegroundColor Magenta
 
     # Build the wheel
     Write-Host "[3/4] Building wheel ..." -ForegroundColor Yellow
@@ -171,6 +187,22 @@ foreach ($PyVer in $PythonVersions) {
         }
     } finally {
         Pop-Location
+    }
+
+    # Rename wheel to include torch version infix
+    # e.g. sageattention-2.2.0-cp310-cp310-win_amd64.whl
+    #   -> sageattention-2.2.0+torch290-cp310-cp310-win_amd64.whl
+    $cpTag = "cp$($PyVer -replace '\.','')"
+    $builtWheel = Get-ChildItem $DistDir -Filter "sageattention-*-${cpTag}-${cpTag}-*.whl" |
+        Where-Object { $_.Name -notmatch '\+torch' } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($builtWheel) {
+        $newName = $builtWheel.Name -replace '(sageattention-[^-]+)(-)', "`$1+torch${torchTag}`$2"
+        $newPath = Join-Path $DistDir $newName
+        if ($newName -ne $builtWheel.Name) {
+            Move-Item $builtWheel.FullName $newPath -Force
+            Write-Host "  Renamed: $($builtWheel.Name) -> $newName" -ForegroundColor Yellow
+        }
     }
 
     Write-Host "[4/4] Done for Python $PyVer" -ForegroundColor Green
