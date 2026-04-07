@@ -13,9 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <torch/all.h>
-#include <torch/python.h>
-#include <torch/nn/functional.h>
+#include <torch/types.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime_api.h>
@@ -619,10 +617,4 @@ void scaled_fp4_quant_trans(torch::Tensor const& input,
               stride_bz_output_sf, stride_h_output_sf, stride_d_output_sf);
     });
   });
-}
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("scaled_fp4_quant", &scaled_fp4_quant);
-  m.def("scaled_fp4_quant_permute", &scaled_fp4_quant_permute);
-  m.def("scaled_fp4_quant_trans", &scaled_fp4_quant_trans);
 }

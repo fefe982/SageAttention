@@ -30,6 +30,16 @@
 #include "named_barrier.h"
 using namespace cute;
 
+// Workaround: nvcc's cudafe strips 'typename' from non-dependent qualified
+// names when generating host code, causing MSVC C2061 errors. These helper
+// functions keep 'typename' in a dependent context that nvcc preserves.
+namespace flash { namespace detail {
+template<typename Config>
+auto blk_layout_sf_type() -> typename Config::LayoutSF;
+template<typename Config>
+auto blk_sf_atom_type() -> typename Config::SfAtom;
+}} // namespace flash::detail
+
 template <
     int kStages,
     int EpiStages,
@@ -151,8 +161,8 @@ struct Flash_fwd_kernel_traits {
     using SmemCopyAtomDS = Copy_Atom<UniversalCopy<float>, float>;
 
     using BlkScaledConfig = flash::BlockScaledConfig<SFVectorSize>;
-    using LayoutSF = typename BlkScaledConfig::LayoutSF;
-    using SfAtom = typename BlkScaledConfig::SfAtom;
+    using LayoutSF = decltype(flash::detail::blk_layout_sf_type<BlkScaledConfig>());
+    using SfAtom = decltype(flash::detail::blk_sf_atom_type<BlkScaledConfig>());
     using SmemLayoutAtomSFQ = decltype(BlkScaledConfig::deduce_smem_layoutSFQ(TiledMmaQK{}, TileShape_MNK{}));
     using SmemLayoutAtomSFK = decltype(BlkScaledConfig::deduce_smem_layoutSFKV(TiledMmaQK{}, TileShape_MNK{}));
     using SmemLayoutAtomSFV = decltype(BlkScaledConfig::deduce_smem_layoutSFKV(TiledMmaPV{}, TileShape_MNK{}));

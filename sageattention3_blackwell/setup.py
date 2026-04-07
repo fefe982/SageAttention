@@ -1,5 +1,6 @@
 import warnings
 import os
+import sys
 from pathlib import Path
 from packaging.version import parse, Version
 from setuptools import setup, find_packages
@@ -8,6 +9,8 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
+
+IS_WINDOWS = sys.platform == "win32"
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,7 +26,8 @@ FORCE_CXX11_ABI = os.getenv("FAHOPPER_FORCE_CXX11_ABI", "FALSE") == "TRUE"
 
 
 def get_cuda_bare_metal_version(cuda_dir):
-    raw_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True)
+    nvcc_bin = os.path.join(cuda_dir, "bin", "nvcc.exe" if IS_WINDOWS else "nvcc")
+    raw_output = subprocess.check_output([nvcc_bin, "-V"], universal_newlines=True)
     output = raw_output.split()
     release_idx = output.index("release") + 1
     bare_metal_version = parse(output[release_idx].split(",")[0])
@@ -108,6 +112,18 @@ if not SKIP_CUDA_BUILD:
         "-DCTA256",
         "-DDQINRMEM",
     ]
+    if IS_WINDOWS:
+        # MSVC: relax two-phase lookup for CUTLASS template-heavy code (attn ext only)
+        nvcc_flags_attn = nvcc_flags + ["-Xcompiler", "/Zc:twoPhase-"]
+        cxx_flags_attn = ["/O2", "/std:c++17", "/Zc:twoPhase-"]
+        # Quantization extension: same flags as attn extension for consistency
+        nvcc_flags_quant = nvcc_flags + ["-Xcompiler", "/Zc:twoPhase-"]
+        cxx_flags_quant = ["/O2", "/std:c++17", "/Zc:twoPhase-"]
+    else:
+        nvcc_flags_attn = nvcc_flags
+        cxx_flags_attn = ["-O3", "-std=c++17"]
+        nvcc_flags_quant = nvcc_flags
+        cxx_flags_quant = ["-O3", "-std=c++17"]
     include_dirs = [
         repo_dir / "sageattn3",
         cutlass_dir / "include",
@@ -119,9 +135,9 @@ if not SKIP_CUDA_BUILD:
             name="fp4attn_cuda",
             sources=["sageattn3/blackwell/api.cu"],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"],
+                "cxx": cxx_flags_attn,
                 "nvcc": append_nvcc_threads(
-                    nvcc_flags + ["-DEXECMODE=0"] + cc_flag
+                    nvcc_flags_attn + ["-DEXECMODE=0"] + cc_flag
                 ),
             },
             include_dirs=include_dirs,
@@ -132,11 +148,14 @@ if not SKIP_CUDA_BUILD:
     ext_modules.append(
         CUDAExtension(
             name="fp4quant_cuda",
-            sources=["sageattn3/quantization/fp4_quantization_4d.cu"],
+            sources=[
+                "sageattn3/quantization/fp4_quantization_4d.cu",
+                "sageattn3/quantization/pybind.cpp",
+            ],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"],
+                "cxx": cxx_flags_quant,
                 "nvcc": append_nvcc_threads(
-                    nvcc_flags + ["-DEXECMODE=0"] + cc_flag
+                    nvcc_flags_quant + ["-DEXECMODE=0"] + cc_flag
                 ),
             },
             include_dirs=include_dirs,
