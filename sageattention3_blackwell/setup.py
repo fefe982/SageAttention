@@ -113,12 +113,11 @@ if not SKIP_CUDA_BUILD:
         "-DDQINRMEM",
     ]
     if IS_WINDOWS:
-        # MSVC: relax two-phase lookup for CUTLASS template-heavy code (attn ext only)
-        nvcc_flags_attn = nvcc_flags + ["-Xcompiler", "/Zc:twoPhase-"]
-        cxx_flags_attn = ["/O2", "/std:c++17", "/Zc:twoPhase-"]
-        # Quantization extension: same flags as attn extension for consistency
-        nvcc_flags_quant = nvcc_flags + ["-Xcompiler", "/Zc:twoPhase-"]
-        cxx_flags_quant = ["/O2", "/std:c++17", "/Zc:twoPhase-"]
+        msvc_flags = ["/Zc:twoPhase-", "/Zc:__cplusplus", "/bigobj", "/permissive-"]
+        nvcc_flags_attn = nvcc_flags + ["-diag-suppress=177"] + [f"-Xcompiler={f}" for f in msvc_flags]
+        cxx_flags_attn = ["/O2", "/std:c++17"] + msvc_flags
+        nvcc_flags_quant = nvcc_flags + [f"-Xcompiler={f}" for f in msvc_flags]
+        cxx_flags_quant = ["/O2", "/std:c++17"] + msvc_flags
     else:
         nvcc_flags_attn = nvcc_flags
         cxx_flags_attn = ["-O3", "-std=c++17"]

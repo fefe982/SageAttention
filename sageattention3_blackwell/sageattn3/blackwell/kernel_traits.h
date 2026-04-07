@@ -30,16 +30,6 @@
 #include "named_barrier.h"
 using namespace cute;
 
-// Workaround: nvcc's cudafe strips 'typename' from non-dependent qualified
-// names when generating host code, causing MSVC C2061 errors. These helper
-// functions keep 'typename' in a dependent context that nvcc preserves.
-namespace flash { namespace detail {
-template<typename Config>
-auto blk_layout_sf_type() -> typename Config::LayoutSF;
-template<typename Config>
-auto blk_sf_atom_type() -> typename Config::SfAtom;
-}} // namespace flash::detail
-
 template <
     int kStages,
     int EpiStages,
@@ -105,7 +95,7 @@ struct Flash_fwd_kernel_traits {
     using ElementAccum = float;
     using ElementOut = ElementOut_;
     using index_t = int64_t;
-    static constexpr auto SFVectorSize = 16;
+    static constexpr int SFVectorSize = 16;
     using TileShape_MNK = Shape<Int<kBlockM>, Int<kBlockN>, Int<kHeadDim>>;
     using ClusterShape_MNK = Shape<_1, _1, _1>;
     using PermTileM = decltype(cute::min(size<0>(TileShape_MNK{}), _128{}));
@@ -159,14 +149,36 @@ struct Flash_fwd_kernel_traits {
     using SmemCopyAtomKV = Copy_Atom<SM75_U32x4_LDSM_N, Element>;
     using SmemCopyAtomSF = Copy_Atom<UniversalCopy<ElementSF>, ElementSF>;
     using SmemCopyAtomDS = Copy_Atom<UniversalCopy<float>, float>;
+#if defined(_MSC_VER)
 
+    using BlkScaledConfig = ::flash::BlockScaledConfig<SFVectorSize>;
+    // Inline the definitions to avoid MSVC dependent-name quirks
+    using SfAtom = Layout<
+        Shape< Shape<_16, _4>, Shape<Int<SFVectorSize>, Int<4>>>,
+        Stride<Stride<_16, _4>, Stride<_0, _1>>
+    >;
+    using LayoutSF = decltype(
+      blocked_product(
+        SfAtom{},
+        make_layout(
+          make_shape(int32_t(0), int32_t(0), int32_t(0), int32_t(0)),
+          make_stride(int32_t(0), _1{}, int32_t(0), int32_t(0))
+        )
+      )
+    );    
+    using SmemLayoutAtomSFQ = decltype(::flash::BlockScaledConfig<SFVectorSize>::deduce_smem_layoutSFQ(TiledMmaQK{}, TileShape_MNK{}));
+    using SmemLayoutAtomSFK = decltype(::flash::BlockScaledConfig<SFVectorSize>::deduce_smem_layoutSFKV(TiledMmaQK{}, TileShape_MNK{}));
+    using SmemLayoutAtomSFV = decltype(::flash::BlockScaledConfig<SFVectorSize>::deduce_smem_layoutSFKV(TiledMmaPV{}, TileShape_MNK{}));
+    using SmemLayoutAtomSFVt = decltype(::flash::BlockScaledConfig<SFVectorSize>::deduce_smem_layoutSFVt(TiledMmaPV{}, Shape<Int<kBlockM>, Int<kHeadDim>, Int<kBlockN>>{}));
+#else
     using BlkScaledConfig = flash::BlockScaledConfig<SFVectorSize>;
-    using LayoutSF = decltype(flash::detail::blk_layout_sf_type<BlkScaledConfig>());
-    using SfAtom = decltype(flash::detail::blk_sf_atom_type<BlkScaledConfig>());
+    using LayoutSF = typename BlkScaledConfig::LayoutSF;
+    using SfAtom = typename BlkScaledConfig::SfAtom;
     using SmemLayoutAtomSFQ = decltype(BlkScaledConfig::deduce_smem_layoutSFQ(TiledMmaQK{}, TileShape_MNK{}));
     using SmemLayoutAtomSFK = decltype(BlkScaledConfig::deduce_smem_layoutSFKV(TiledMmaQK{}, TileShape_MNK{}));
     using SmemLayoutAtomSFV = decltype(BlkScaledConfig::deduce_smem_layoutSFKV(TiledMmaPV{}, TileShape_MNK{}));
     using SmemLayoutAtomSFVt = decltype(BlkScaledConfig::deduce_smem_layoutSFVt(TiledMmaPV{}, Shape<Int<kBlockM>, Int<kHeadDim>, Int<kBlockN>>{}));
+#endif
     using LayoutSFP = decltype(
       make_layout(
           make_shape(make_shape(_16{}, _4{}), _1{}, Int<kBlockN / 64>{}),
